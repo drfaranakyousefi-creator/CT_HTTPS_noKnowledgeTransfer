@@ -7,6 +7,36 @@ from new_dataset import data_preparing
 from transmitter_simulation import Transmitter
 
 
+def lr_at_epoch(epoch_1based, lr_spec):
+    """
+    lr_spec: عدد ثابت یا dict مثل {10: 0.01, 20: 0.001, 30: 0.0001}
+    معنی dict (اپک از 1 شروع می‌شود):
+      اپک‌های 1..10   → همان LR زیر کلید 10 (کم‌ترین milestone که epoch <= آن)
+      اپک‌های 11..20 → LR کلید 20
+      بعد از آخرین milestone → آخرین LR در دیکشنری
+
+    اگر lr_spec عدد باشد، همان مقدار برای هر اپک برمی‌گردد.
+    """
+    if lr_spec is None:
+        raise ValueError("lr / lr_spec نمی‌تواند None باشد.")
+    if not isinstance(lr_spec, dict):
+        return float(lr_spec)
+    if not lr_spec:
+        raise ValueError("دیکشنری lr خالی است.")
+    milestones = sorted(lr_spec.keys(), key=lambda x: int(x))
+    for m in milestones:
+        if epoch_1based <= int(m):
+            return float(lr_spec[m])
+    return float(lr_spec[milestones[-1]])
+
+
+def _initial_scalar_lr(lr, override):
+    """مقدار اولیهٔ Adam؛ اگر override باشد همان، وگرنه از lr یا اولین بازهٔ dict."""
+    if override is not None:
+        return float(override)
+    return lr_at_epoch(1, lr)
+
+
 def _parse_CT_HTTPS_positional(args, chartevents_kw):
     """
     قدیمی: (csv_path, w, dataset_name, batch_size [, server_url])
@@ -122,10 +152,15 @@ class CT_HTTPS(nn.Module):
             raise TypeError(f"کلیدهای نامعتبر به CT_HTTPS: {unexpected}")
 
         _ = server_url
-        if client_lr is None:
-            client_lr = lr
+        self._lr_spec = lr
+        client_lr = _initial_scalar_lr(lr, client_lr)
         if server_lr is None:
-            server_lr = lr
+            if isinstance(lr, dict):
+                server_lr = lr_at_epoch(1, lr)
+            else:
+                server_lr = float(lr)
+        else:
+            server_lr = float(server_lr)
         self.device = device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
@@ -174,13 +209,27 @@ class CT_HTTPS(nn.Module):
 
         self.loss_fn = nn.MSELoss()
 
+    def _apply_learning_rate(self, lr_value):
+        """به‌روزرسانی همزمان Adam کلاینت و سرور (کپسولی)."""
+        v = float(lr_value)
+        for g in self.network.optimizer.param_groups:
+            g["lr"] = v
+        for g in self.transmittion.model.optimizer.param_groups:
+            g["lr"] = v
+
     def fit(self, epochs):
         history = {"loss_train": [], "loss_test": []}
         for epoch in range(epochs):
+            ep = epoch + 1
+            if isinstance(self._lr_spec, dict):
+                lr_now = lr_at_epoch(ep, self._lr_spec)
+            else:
+                lr_now = float(self._lr_spec)
+            self._apply_learning_rate(lr_now)
             self.train_one_epoch()
             loss_train, loss_test = self.evaluate_one_epoch()
             print(
-                f"[epoch {epoch + 1}/{epochs}  train_loss={loss_train:.4f}  "
+                f"[epoch {ep}/{epochs}  lr={lr_now:.6f}  train_loss={loss_train:.4f}  "
                 f"test_loss={loss_test:.4f}]"
             )
             history["loss_train"].append(loss_train.item())
