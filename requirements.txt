@@ -1,0 +1,5 @@
+# اجرای پروژه (Split learning شبیه‌سازی‌شده با CT_HTTPS)
+torch>=2.0
+pandas>=1.5
+numpy>=1.23
+matplotlib>=3.7
