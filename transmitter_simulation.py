@@ -1,9 +1,9 @@
 import json
 import torch
 from server_net import prediction_net
+import torch.nn as nn 
 
-
-class Transmitter:
+class Transmitter(nn.Module):
     """
     شبیه‌سازی کانال شبکه بین کلاینت و سروربدون درخواست HTTP:
     detach → لیست/json → شبکهٔ کپسولی (prediction_net).
