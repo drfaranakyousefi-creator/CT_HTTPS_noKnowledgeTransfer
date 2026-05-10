@@ -60,11 +60,6 @@ class RoutingLayer(nn.Module):
 
 # ---------------------------------------------------------------
 # Prediction Network با Capsule
-#
-# تغییر نسبت به قبل:
-#   ورودی الان بردار CLS از transformer کلاینت هست
-#   شکل: (batch, d_model)
-#   قبلاً: (batch, w + N)
 # ---------------------------------------------------------------
 class prediction_net(nn.Module):
     def __init__(
@@ -113,8 +108,24 @@ class prediction_net(nn.Module):
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         self.to(self.device)
 
+    def forward_direct(self, cls_tensor):
+        """
+        ورودی مستقیم tensor با graph سالم — بدون JSON، بدون torch.tensor جدید.
+        گراف محاسباتی از client تا اینجا کاملاً حفظ میشه.
+        خروجی: (batch,)
+        """
+        h = self.fc_in(cls_tensor)
+        h = self.primary_caps(h)
+        h = self.routing(h)
+        h = h.view(h.size(0), -1)
+        output = self.fc_out(h)
+        return output.squeeze(1)  # (batch,)
+
     def forward(self, cls_vector, label=None, status='test'):
-        # cls_vector: list یا tensor با شکل (batch, d_model)
+        """
+        متد قدیمی — فقط برای سازگاری با transmitter_simulation نگه داشته شده.
+        در مسیر جدید (CT_HTTPS) از این استفاده نمیشه.
+        """
         x = torch.tensor(cls_vector, dtype=torch.float, device=self.device)
         x.requires_grad_(True)
 
@@ -127,12 +138,10 @@ class prediction_net(nn.Module):
         if status == 'train':
             label = torch.tensor(label, dtype=torch.float, device=self.device)
             self.optimizer.zero_grad()
-            # output: (batch,1) — label: (batch,) → squeeze لازمه تا broadcasting اشتباه نشه
             loss = self.loss_fn(output.squeeze(1), label)
             loss.backward()
             input_grad = x.grad.detach().cpu().tolist()
             self.optimizer.step()
             return {'grad': input_grad}
         else:
-            # squeeze تا prediction شکل (batch,) داشته باشه نه (batch,1)
             return {'prediction': output.squeeze(1).detach().cpu().tolist()}
