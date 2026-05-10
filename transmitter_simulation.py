@@ -22,6 +22,7 @@ class Transmitter(nn.Module):
         fc_hidden1=128,
         fc_hidden2=64,
     ):
+        super().__init__()
         self.device = device
         self.model = prediction_net(
             d_model=d_model,
