@@ -26,7 +26,7 @@ def filter_noisy_data(x, dataset_name):
     return filtered_df
 
 
-def extract_data_from_person(dataframe, W, dataset_name, target, min_mask_len=4):
+def extract_data_from_person(dataframe, W, dataset_name, target, min_mask_len=2):
     """
     min_mask_len: حداقل تعداد time step های پر شده برای اینکه یه sample ذخیره بشه.
                   اگه s <= min_mask_len بود، sample رو نگه نمی‌داریم و ادامه می‌دیم
@@ -204,17 +204,35 @@ class ICUDataset(Dataset):
 class data_preparing:
     def __init__(
         self, data_frame, dataset_name, w, test_size, target, batch_size,
-        normalize=True, min_mask_len=2
+        normalize=True, min_mask_len=2, drop_ratio=0.10, seed=42
     ):
         x, y, mask = extract_data(
             dataset_name, data_frame, w, target,
             normalize=normalize, min_mask_len=min_mask_len
         )
 
-        train_n = int((1 - test_size) * x.shape[0])
+        total = x.shape[0]
 
-        train_dataset = ICUDataset(x[:train_n], y[:train_n], mask[:train_n])
-        test_dataset  = ICUDataset(x[train_n:], y[train_n:], mask[train_n:])
+        # ── مرحله ۱: حذف رندوم drop_ratio از کل داده‌ها ──────────
+        torch.manual_seed(seed)
+        perm = torch.randperm(total)
+        keep_n = int((1 - drop_ratio) * total)
+        keep_idx = perm[:keep_n]                 # ایندکس‌های نگه‌داشته‌شده
+        x    = x[keep_idx]
+        y    = y[keep_idx]
+        mask = mask[keep_idx]
+
+        # ── مرحله ۲: تقسیم رندوم به train / test ─────────────────
+        total_kept = x.shape[0]
+        perm2 = torch.randperm(total_kept)
+        test_n  = int(test_size * total_kept)
+        train_n = total_kept - test_n
+
+        train_idx = perm2[:train_n]
+        test_idx  = perm2[train_n:]
+
+        train_dataset = ICUDataset(x[train_idx], y[train_idx], mask[train_idx])
+        test_dataset  = ICUDataset(x[test_idx],  y[test_idx],  mask[test_idx])
 
         self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         self.test_loader  = DataLoader(test_dataset,  batch_size=batch_size, shuffle=True)
