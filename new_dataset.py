@@ -204,7 +204,7 @@ class ICUDataset(Dataset):
 class data_preparing:
     def __init__(
         self, data_frame, dataset_name, w, test_size, target, batch_size,
-        normalize=True, min_mask_len=2, drop_ratio=0.0, seed=42
+        normalize=True, min_mask_len=2, drop_ratio=0.10, seed=42
     ):
         x, y, mask = extract_data(
             dataset_name, data_frame, w, target,
