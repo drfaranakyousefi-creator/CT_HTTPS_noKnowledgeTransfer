@@ -26,7 +26,12 @@ def filter_noisy_data(x, dataset_name):
     return filtered_df
 
 
-def extract_data_from_person(dataframe, W, dataset_name, target):
+def extract_data_from_person(dataframe, W, dataset_name, target, min_mask_len=2):
+    """
+    min_mask_len: حداقل تعداد time step های پر شده برای اینکه یه sample ذخیره بشه.
+                  اگه s <= min_mask_len بود، sample رو نگه نمی‌داریم و ادامه می‌دیم
+                  تا window پرتر بشه.
+    """
     if dataset_name == 'metavision':
         N = 4
     else:
@@ -40,6 +45,26 @@ def extract_data_from_person(dataframe, W, dataset_name, target):
     x = torch.zeros(W, N)
     m = torch.zeros(W)
     s = 0
+
+    def try_save_and_reset(value):
+        """
+        اگه s > min_mask_len بود sample رو ذخیره کن و reset کن.
+        اگه نه، فقط reset کن بدون ذخیره.
+        مقدار بولین برمی‌گردونه که آیا ذخیره شد یا نه.
+        """
+        nonlocal s, x, m, e
+        saved = False
+        if s > min_mask_len:
+            data.append(x.clone())
+            label.append(value)
+            mask.append(m.clone())
+            saved = True
+        # در هر صورت reset
+        m = torch.zeros(W)
+        x = torch.zeros(W, N)
+        e = torch.zeros(N)
+        s = 0
+        return saved
 
     for index, row in dataframe.iterrows():
         item_id = row['itemid']
@@ -59,18 +84,11 @@ def extract_data_from_person(dataframe, W, dataset_name, target):
             s = 0
             m = torch.zeros(W)
             x = torch.zeros(W, N)
-            e = torch.zeros(N)  # FIX: e هم reset بشه
+            e = torch.zeros(N)
 
         if (item_id == 646) or (item_id == 220277):  # SpO2
             if target == 'spO2':
-                if s > 0:
-                    data.append(x.clone())   # FIX: clone تا reference مشترک نداشته باشن
-                    label.append(value)
-                    mask.append(m.clone())
-                    m = torch.zeros(W)
-                    x = torch.zeros(W, N)
-                    e = torch.zeros(N)
-                    s = 0
+                try_save_and_reset(value)
             elif target == 'BP':
                 e[0] = value
                 x[s, :] = e.clone()
@@ -84,14 +102,7 @@ def extract_data_from_person(dataframe, W, dataset_name, target):
 
         elif (item_id == 52) or (item_id == 220052):  # ABP Mean
             if target == 'BP':
-                if s > 0:
-                    data.append(x.clone())
-                    label.append(value)
-                    mask.append(m.clone())
-                    m = torch.zeros(W)
-                    x = torch.zeros(W, N)
-                    e = torch.zeros(N)
-                    s = 0
+                try_save_and_reset(value)
             else:
                 e[0] = value
                 x[s, :] = e.clone()
@@ -100,14 +111,7 @@ def extract_data_from_person(dataframe, W, dataset_name, target):
 
         elif (item_id == 618) or (item_id == 220210):  # RR
             if target == 'RR':
-                if s > 0:
-                    data.append(x.clone())
-                    label.append(value)
-                    mask.append(m.clone())
-                    m = torch.zeros(W)
-                    x = torch.zeros(W, N)
-                    e = torch.zeros(N)
-                    s = 0
+                try_save_and_reset(value)
             else:
                 e[1] = value
                 x[s, :] = e.clone()
@@ -147,7 +151,7 @@ def extract_data_from_person(dataframe, W, dataset_name, target):
         return None, None, None
 
 
-def extract_data(dataset_name, df_chartevents, w, target, normalize=True):
+def extract_data(dataset_name, df_chartevents, w, target, normalize=True, min_mask_len=2):
     total_subject_ids = df_chartevents['subject_id'].unique()
     all_user_data = []
     all_labels = []
@@ -156,15 +160,15 @@ def extract_data(dataset_name, df_chartevents, w, target, normalize=True):
     for subject_id in total_subject_ids:
         subject_data = df_chartevents[df_chartevents['subject_id'] == subject_id]
         filtered_df = filter_noisy_data(subject_data, dataset_name)
-        data, label, mask = extract_data_from_person(filtered_df, w, dataset_name, target)
+        data, label, mask = extract_data_from_person(
+            filtered_df, w, dataset_name, target, min_mask_len=min_mask_len
+        )
 
-        # FIX: قبلاً label != None بود که برای tensor کار نمیکنه
         if label is not None:
             all_labels.append(label)
             all_user_data.append(data)
             all_mask.append(mask)
 
-    # FIX: اگه هیچ داده‌ای پیدا نشد crash نکنه
     if len(all_user_data) == 0:
         raise ValueError(f"هیچ داده‌ای برای dataset={dataset_name} و target={target} پیدا نشد.")
 
@@ -199,10 +203,12 @@ class ICUDataset(Dataset):
 
 class data_preparing:
     def __init__(
-        self, data_frame, dataset_name, w, test_size, target, batch_size, normalize=True
+        self, data_frame, dataset_name, w, test_size, target, batch_size,
+        normalize=True, min_mask_len=2
     ):
         x, y, mask = extract_data(
-            dataset_name, data_frame, w, target, normalize=normalize
+            dataset_name, data_frame, w, target,
+            normalize=normalize, min_mask_len=min_mask_len
         )
 
         train_n = int((1 - test_size) * x.shape[0])
