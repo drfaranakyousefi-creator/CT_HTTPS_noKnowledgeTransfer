@@ -26,7 +26,7 @@ def filter_noisy_data(x, dataset_name):
     return filtered_df
 
 
-def extract_data_from_person(dataframe, W, dataset_name, target, min_mask_len=3):
+def extract_data_from_person(dataframe, W, dataset_name, target, min_mask_len=4):
     """
     min_mask_len: حداقل تعداد time step های پر شده برای اینکه یه sample ذخیره بشه.
                   اگه s <= min_mask_len بود، sample رو نگه نمی‌داریم و ادامه می‌دیم
